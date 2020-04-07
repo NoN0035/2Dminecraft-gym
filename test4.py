@@ -10,6 +10,9 @@ from PIL import Image
 
 import math
 
+import random
+import noise
+
 def isPressed(key):
     return(bool(ctypes.windll.user32.GetAsyncKeyState(key)&0x8000))
 
@@ -33,12 +36,15 @@ class env:#システム系
 
 
     NAMELIST = ['air','stone','grass','dirt','cobblestone','planks','sapling','bedrock','water','lava','gold_ore','iron_ore','coal_ore','log'
-    ,'leaves','bed','crafting_table','diamond_ore','iron_shovel','iron_pickaxe','iron_axe','apple','iron_sword','wooden_sword'
-    ,'wooden_shovel','wooden_pickaxe','wooden_axe','stone_sword','stone_shovel','stone_pickaxe','stone_axe','stick','iron_helmet'
-    ,'iron_chestplate','iron_leggings','iron_boots','diamond_helmet','diamond_chestplate','diamond_leggings','diamond_boots','porkchop']
+    ,'leaves','crafting_table','diamond_ore','iron_shovel','iron_pickaxe','iron_axe','apple','iron_sword','wooden_sword'
+    ,'wooden_shovel','wooden_pickaxe','wooden_axe','stone_sword','stone_shovel','stone_pickaxe','stone_axe','stick']
+    #地形生成の滑らかさ64の約数でなければならない
+    SMOOTHNESS = 200
+    OCTAVES = 6
+    PERSISTENCE = 0.5
+    LACUNARITY = 2.0
+    SEED = 0
 
-
-    SKIN = ([247,195,169])
     AIR = ([131,166,255])
     def __init__(self):
         self._reset()
@@ -65,9 +71,24 @@ class env:#システム系
         self.holding_item = 1
 
         try:
+            self.world = np.load('./saves/world1/map/world.npy')
+        except FileNotFoundError:
+            self.world = np.zeros(20000)
+            for i in range(20000):
+                self.world[i] = noise.pnoise2(i/self.SMOOTHNESS, 
+                                        1,
+                                        octaves=self.OCTAVES, 
+                                        persistence=self.PERSISTENCE, 
+                                        lacunarity=self.LACUNARITY, 
+                                        repeatx=1024, 
+                                        repeaty=1024, 
+                                        base=self.SEED)
+            np.save('./saves/world1/map/world.npy',self.world)
+
+        try:
             self.player = np.load('./saves/world1/playerdata/location.npy')
         except FileNotFoundError:#プレーヤーのデータがなかった場合0 64
-            self.player[1] = 64
+            self.player[1] = 100
         self.get_chunkID()
         try:#セーブデータロード
             if self.player[0]%64 < 32:#プレーヤーの場所は2
@@ -83,6 +104,8 @@ class env:#システム系
 
         #ここから下は人がプレイするときだけ使う
         self.actions = np.zeros(16)
+
+        random.seed(self.SEED)
 
         #AIがプレイするときはここから消してrenderの一番上に持っていく
         if self.steps == 0:#一度目の処理なので描画初期化
@@ -139,11 +162,6 @@ class env:#システム系
             self.font = pygame.font.Font(None, 15)               # フォントの設定(55px)
             self.fps_clock = pygame.time.Clock()
         '''
-        '''
-        if self.steps%1280 < 640:#320以下は昼
-            self.BLOCK_DATA[0,:3] = [131,166,255]
-        if self.steps%1280 >= 640:#320以下は昼
-            self.BLOCK_DATA[0,:3] = [0,0,0]'''
 
         self.view = np.fliplr(self.view)#上下反転
 
@@ -196,15 +214,86 @@ class env:#システム系
         else:
             self.view = self.land[self.chunk_player_x-8:self.chunk_player_x+9,self.player[1]-3:self.player[1]+6].copy()
 
-    def make_world(self,chunk_ID):#ワールド生成 chunk_IDは生成する予定のチャンクのID chunk0/chunk1
+    def make_world(self,mchunk_ID):#ワールド生成 chunk_IDは生成する予定のチャンクのID chunk0/chunk1
+        self.get_chunkID()
+        count = 0
         #後々変更
-        if chunk_ID == 0:
-            self.land[:64,:][:,:69] = 2
-            self.land[:64,:][:,69:] = 0
+        if mchunk_ID == 0:
+            self.land[:64,:][:,:] = 0
+            for i in range(64):
+                y = 64+100*self.world[10000+(self.chunk_ID*64-i)]
+                self.land[:64,:][int(63-i)][:int(y)] = 1
+                self.land[:64,:][int(63-i)][int(y)] = 3
+                self.land[:64,:][int(63-i)][int(y+1)] = 2
+                count = count + 1
+                if y < 64 and random.randint(0,3) == 0 and 1 < i < 62 and 4 < count:
+                    self.land[:64,:][int(61-i):int(66-i),int(y+3):int(y+5)] = 14
+                    self.land[:64,:][int(62-i):int(65-i),int(y+5):int(y+7)] = 14
+                    self.land[:64,:][int(63-i)][int(y+2):int(y+6)] = 13
+                    count = 0
+                if random.randint(0,16) == 0:
+                    y1 = random.randint(0,int(y-5))
+                    self.land[:64,:][int(61-i):int(66-i),int(y1+3):int(y1+5)] = 12
+                if random.randint(0,32) == 0:
+                    y1 = random.randint(0,int(y-5))
+                    self.land[:64,:][int(61-i):int(63-i),int(y1+3):int(y1+5)] = 11
+                if random.randint(0,64) == 0 and y > 31:
+                    y1 = random.randint(0,int(y-30))
+                    self.land[:64,:][int(61-i):int(63-i),int(y1+3):int(y1+5)] = 10
+                if random.randint(0,192) == 0 and y > 41:
+                    y1 = random.randint(0,int(y-40))
+                    self.land[:64,:][int(61-i):int(63-i),int(y1+3):int(y1+5)] = 16
             self.land[:64,:][:,0] = 7
-        if chunk_ID == 1:
-            self.land[64:,:][:,:69] = 2
-            self.land[64:,:][:,69:] = 0
+        elif mchunk_ID == 1:
+            self.land[64:,:] = 0
+            if not (self.chunk_ID == 0 and self.steps == 0):
+                for i in range(64):
+                    y = 64+100*self.world[10000+((self.chunk_ID+1)*64+i)]
+                    self.land[64:,:][i][:int(y)] = 1
+                    self.land[64:,:][i][int(y)] = 3
+                    self.land[64:,:][i][int(y+1)] = 2
+                    count = count + 1
+                    if y < 64 and random.randint(0,3) == 0 and 1 < i < 62 and 4 < count:
+                        self.land[64:,:][int(i-2):int(i+3),int(y+3):int(y+5)] = 14
+                        self.land[64:,:][int(i-1):int(i+2),int(y+5):int(y+7)] = 14
+                        self.land[64:,:][i][int(y+2):int(y+6)] = 13
+                        count = 0
+                    if random.randint(0,16) == 0:
+                        y1 = random.randint(0,int(y-5))
+                        self.land[64:,:][int(i-2):int(i+3),int(y1+3):int(y1+5)] = 12
+                    if random.randint(0,32) == 0:
+                        y1 = random.randint(0,int(y-5))
+                        self.land[64:,:][int(i-2):int(i),int(y1+3):int(y1+5)] = 11
+                    if random.randint(0,64) == 0 and y > 31:
+                        y1 = random.randint(0,int(y-30))
+                        self.land[64:,:][int(i-2):int(i),int(y1+3):int(y1+5)] = 10
+                    if random.randint(0,192) == 0 and y > 41:
+                        y1 = random.randint(0,int(y-40))
+                        self.land[64:,:][int(i-2):int(i),int(y1+3):int(y1+5)] = 16
+            else:#初回ロード地形生成のときだけ自分の居場所IDは無理
+                for i in range(64):
+                    y = 64+100*self.world[10000+(self.chunk_ID*64+i)]
+                    self.land[64:,:][i][:int(y)] = 1
+                    self.land[64:,:][i][int(y)] = 3
+                    self.land[64:,:][i][int(y+1)] = 2
+                    count = count + 1
+                    if y < 64 and random.randint(0,3) == 0 and 1 < i < 62 and 4 < count:#木
+                        self.land[64:,:][int(i-2):int(i+3),int(y+3):int(y+5)] = 14
+                        self.land[64:,:][int(i-1):int(i+2),int(y+5):int(y+7)] = 14
+                        self.land[64:,:][i][int(y+2):int(y+6)] = 13#幹
+                        count = 0
+                    if random.randint(0,16) == 0:
+                        y1 = random.randint(0,int(y-5))
+                        self.land[64:,:][int(i-2):int(i+3),int(y1+3):int(y1+5)] = 12
+                    if random.randint(0,32) == 0:
+                        y1 = random.randint(0,int(y-5))
+                        self.land[64:,:][int(i-2):int(i),int(y1+3):int(y1+5)] = 11
+                    if random.randint(0,64) == 0 and y > 31:
+                        y1 = random.randint(0,int(y-30))
+                        self.land[64:,:][int(i-2):int(i),int(y1+3):int(y1+5)] = 10
+                    if random.randint(0,192) == 0 and y > 41:
+                        y1 = random.randint(0,int(y-40))
+                        self.land[64:,:][int(i-2):int(i),int(y1+3):int(y1+5)] = 16
             self.land[64:,:][:,0] = 7
 
     def save(self,chunk_ID,land_ID):
@@ -297,15 +386,15 @@ class env:#システム系
         
     def execute_action(self):
         if self.actions[0] == 1:#右print(self.block_data(1,2))
-            if self.block_data(1,0) == 0 and self.block_data(1,1) == 0:
+            if (self.block_data(1,0) == 0 or self.block_data(1,0) == 13 or self.block_data(1,0) == 14) and (self.block_data(1,1) == 0 or self.block_data(1,1) == 13 or self.block_data(1,1) == 14):
                 self.player[0] = self.player[0] + 1
                 self.move_direction = 0
         if self.actions[1] == 1:#左
-            if self.block_data(-1,0) == 0 and self.block_data(-1,1) == 0:
+            if (self.block_data(-1,0) == 0 or self.block_data(-1,0) == 13 or self.block_data(-1,0) == 14) and (self.block_data(-1,1) == 0 or self.block_data(-1,1) == 13 or self.block_data(-1,1) == 14):
                 self.player[0] = self.player[0] - 1
                 self.move_direction = 1
         if self.actions[2] == 1:
-            if self.block_data(0,2) == 0:
+            if self.block_data(0,2) == 0 or self.block_data(0,2) == 13 or self.block_data(0,2) == 14:
                 if self.player[1] >= 0:
                     if self.flying_time == 0:#空中に浮いてない場合
                         self.player[1] = self.player[1] + 1
@@ -379,8 +468,8 @@ class env:#システム系
                 self.holding_item = self.holding_item - 1
 
             if self.holding_item < 1:#1以下になったら最後に戻る
-                self.holding_item = 40
-            if self.holding_item > 40:
+                self.holding_item = 30
+            if self.holding_item > 30:
                 self.holding_item = 1
 
     def get_chunkID(self):
@@ -431,19 +520,19 @@ class env:#システム系
                         self.player[1] = int(fall_y)
                     else:
                         for y in range(int(fall_y),128)[::-1]:
-                            if not self.land[self.chunk_player_x,y] == 0:#空気ブロックじゃなくなったら
+                            if not (self.land[self.chunk_player_x,y] == 0 or self.land[self.chunk_player_x,y] == 13 or self.land[self.chunk_player_x,y] == 14):#空気ブロックじゃなくなったら
                                 self.player[1] = y + 1
                                 break
                             if y <= int(fall_y):
                                 self.player[1] = int(fall_y)
                 self.flying_time = self.flying_time + 1
-            elif self.land[self.chunk_player_x,self.player[1]-1] == 0:#下にブロックがない場合
+            elif self.land[self.chunk_player_x,self.player[1]-1] == 0 or self.land[self.chunk_player_x,self.player[1]-1] == 13 or self.land[self.chunk_player_x,self.player[1]-1] == 14:#下にブロックがない場合
                 if not self.flying_time == 0:#ジャンプしたときは落下しない
                     fall_y = self.player[1]#落下量を計算するためにプレーヤーのyの座標をfloatで格納する変数
                     fall_y = fall_y - (9.8 * (self.flying_time/32)**2 / 2)
                     
                     for y in range(int(fall_y),self.player[1])[::-1]:
-                        if not self.land[self.chunk_player_x,y] == 0:#空気ブロックじゃなくなったら
+                        if not (self.land[self.chunk_player_x,y] == 0 or self.land[self.chunk_player_x,y] == 13 or self.land[self.chunk_player_x,y] == 14):#空気ブロックじゃなくなったら
                             self.player[1] = y + 1
                             break
                         if y <= int(fall_y):
